@@ -813,6 +813,7 @@ async def wifi_disable_to_code(config, action_id, template_arg, args):
 KEEP_SCAN_RESULTS_KEY = "wifi_keep_scan_results"
 RUNTIME_POWER_SAVE_KEY = "wifi_runtime_power_save"
 RUNTIME_ROAMING_SUPPRESSION_KEY = "wifi_runtime_roaming_suppression"
+RUNTIME_RECONNECT_SUPPRESSION_KEY = "wifi_runtime_reconnect_suppression"
 # Keys for listener counts
 IP_STATE_LISTENERS_KEY = "wifi_ip_state_listeners"
 SCAN_RESULTS_LISTENERS_KEY = "wifi_scan_results_listeners"
@@ -870,6 +871,16 @@ def enable_runtime_roaming_suppression() -> None:
     CORE.data[RUNTIME_ROAMING_SUPPRESSION_KEY] = True
 
 
+def enable_runtime_reconnect_suppression() -> None:
+    """Enable runtime suppression of disconnected STA reconnect activity.
+
+    Radio-sharing components such as ESP-NOW can use the generated API to pause
+    WiFi scans and association attempts while preserving the initialized radio
+    on a requested 2.4 GHz channel. Only supported on ESP32.
+    """
+    CORE.data[RUNTIME_RECONNECT_SUPPRESSION_KEY] = True
+
+
 def request_wifi_ip_state_listener() -> None:
     """Request an IP state listener slot."""
     CORE.data[IP_STATE_LISTENERS_KEY] = CORE.data.get(IP_STATE_LISTENERS_KEY, 0) + 1
@@ -905,6 +916,8 @@ async def final_step():
         cg.add_define("USE_WIFI_RUNTIME_POWER_SAVE")
     if CORE.data.get(RUNTIME_ROAMING_SUPPRESSION_KEY, False):
         cg.add_define("USE_WIFI_RUNTIME_ROAMING_SUPPRESSION")
+    if CORE.data.get(RUNTIME_RECONNECT_SUPPRESSION_KEY, False):
+        cg.add_define("USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION")
     if CORE.data.get(SCAN_RESULTS_LOCK_KEY):
         cg.add_define("USE_WIFI_SCAN_RESULTS_LOCK")
 

@@ -36,7 +36,15 @@ def test_external_component_layout_is_complete() -> None:
 
 
 def test_baseline_matches_esphome_2026_7_3_archive() -> None:
+    expected_modified = {
+        "components/wifi/__init__.py",
+        "components/wifi/wifi_component.cpp",
+        "components/wifi/wifi_component.h",
+        "components/wifi/wifi_component_esp_idf.cpp",
+    }
     for relative_path, expected_digest in _manifest().items():
+        if relative_path in expected_modified:
+            continue
         payload = (ROOT / relative_path).read_bytes()
         actual_digest = hashlib.sha256(payload).hexdigest()
         assert actual_digest == expected_digest, relative_path

@@ -782,6 +782,10 @@ void WiFiComponent::loop() {
     }
 #endif  // USE_WIFI_CONNECT_TRIGGER || USE_WIFI_DISCONNECT_TRIGGER
 
+#if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION)
+    this->update_reconnect_suppression_(now);
+#endif
+
     switch (this->state_) {
       case WIFI_COMPONENT_STATE_COOLDOWN: {
         this->status_set_warning(LOG_STR("waiting to reconnect"));
@@ -839,6 +843,9 @@ void WiFiComponent::loop() {
         }
         break;
       }
+      case WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED:
+        this->status_set_warning(LOG_STR("WiFi reconnect suppressed"));
+        break;
       case WIFI_COMPONENT_STATE_OFF:
       case WIFI_COMPONENT_STATE_AP:
         break;
@@ -919,6 +926,74 @@ void WiFiComponent::loop() {
   }
 #endif
 }
+
+#if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION)
+bool WiFiComponent::request_reconnect_suppression(uint8_t channel) {
+  if (channel < 1 || channel > 14)
+    return false;
+
+  uint16_t current = this->reconnect_suppression_state_.load(std::memory_order_relaxed);
+  while (true) {
+    const uint8_t count = current >> 8;
+    const uint8_t claimed_channel = current & 0xFF;
+    if (count != 0 && claimed_channel != channel)
+      return false;
+    if (count == std::numeric_limits<uint8_t>::max())
+      return true;
+    const uint16_t desired = (static_cast<uint16_t>(count + 1) << 8) | channel;
+    if (this->reconnect_suppression_state_.compare_exchange_weak(current, desired, std::memory_order_relaxed))
+      return true;
+  }
+}
+
+void WiFiComponent::release_reconnect_suppression() {
+  uint16_t current = this->reconnect_suppression_state_.load(std::memory_order_relaxed);
+  while (true) {
+    const uint8_t count = current >> 8;
+    if (count == 0)
+      return;
+    const uint16_t desired = count == 1 ? 0 : (static_cast<uint16_t>(count - 1) << 8) | (current & 0xFF);
+    if (this->reconnect_suppression_state_.compare_exchange_weak(current, desired, std::memory_order_relaxed))
+      return;
+  }
+}
+
+void WiFiComponent::update_reconnect_suppression_(uint32_t now) {
+  const uint16_t request = this->reconnect_suppression_state_.load(std::memory_order_relaxed);
+  const bool requested = (request >> 8) != 0;
+
+  if (requested && !this->connected_ && !this->reconnect_suppression_active_ &&
+      this->state_ != WIFI_COMPONENT_STATE_DISABLED && this->state_ != WIFI_COMPONENT_STATE_OFF) {
+    const uint8_t channel = request & 0xFF;
+    if (this->wifi_enter_reconnect_suppression_(channel)) {
+      this->reconnect_suppression_active_ = true;
+      this->state_ = WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED;
+      this->scan_done_ = false;
+      this->error_from_callback_ = false;
+      this->clear_roaming_state_();
+      ESP_LOGI(TAG, "WiFi reconnect suppressed on channel %u", channel);
+    } else {
+      ESP_LOGW(TAG, "Unable to suppress WiFi reconnect on channel %u", channel);
+    }
+    return;
+  }
+
+  if (this->reconnect_suppression_active_ && (!requested || this->connected_)) {
+    this->reconnect_suppression_active_ = false;
+    this->error_from_callback_ = false;
+    ESP_LOGI(TAG, "WiFi reconnect suppression released");
+    if (!this->connected_) {
+      this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
+      this->num_retried_ = 0;
+      this->selected_sta_index_ = this->sta_.empty() ? -1 : 0;
+      this->start_scanning();
+    } else {
+      this->state_ = WIFI_COMPONENT_STATE_STA_CONNECTED;
+      this->action_started_ = now;
+    }
+  }
+}
+#endif
 
 WiFiComponent::WiFiComponent() { global_wifi_component = this; }
 

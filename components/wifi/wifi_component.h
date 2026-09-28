@@ -97,6 +97,8 @@ enum WiFiComponentState : uint8_t {
   WIFI_COMPONENT_STATE_STA_CONNECTING,
   /** WiFi is in STA(+AP) mode and successfully connected. */
   WIFI_COMPONENT_STATE_STA_CONNECTED,
+  /** STA reconnect activity is paused while the initialized radio remains available. */
+  WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED,
   /** WiFi is in AP-only mode and internal AP is already enabled. */
   WIFI_COMPONENT_STATE_AP,
 };
@@ -661,6 +663,32 @@ class WiFiComponent final : public Component {
   }
 #endif  // USE_ESP32 && USE_WIFI_RUNTIME_ROAMING_SUPPRESSION
 
+#if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION)
+  /** Pause STA reconnect scans and association attempts on a fixed 2.4 GHz channel.
+   *
+   * Multiple callers may share a request when they specify the same channel. A
+   * request for a different channel is rejected while suppression is held.
+   * Suppression only takes effect while STA is disconnected; an established WiFi
+   * connection is never interrupted by this API.
+   *
+   * Thread-safe: may be called from any task. The radio is changed from loop().
+   *
+   * @return true when the request was accepted, false for an invalid or conflicting channel.
+   */
+  bool request_reconnect_suppression(uint8_t channel);
+
+  /** Release one previously accepted reconnect-suppression request.
+   *
+   * An unmatched release is ignored. Reconnection resumes only after the last
+   * accepted requester releases its claim.
+   */
+  void release_reconnect_suppression();
+
+  bool is_reconnect_suppression_requested() const {
+    return (this->reconnect_suppression_state_.load(std::memory_order_relaxed) >> 8) != 0;
+  }
+#endif  // USE_ESP32 && USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION
+
  protected:
 #ifdef USE_WIFI_AP
   void setup_ap_config_();
@@ -764,6 +792,10 @@ class WiFiComponent final : public Component {
   }
   void update_connected_state_() { this->connected_ = this->is_connected_(); }
   bool wifi_scan_start_(bool passive);
+#if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION)
+  bool wifi_enter_reconnect_suppression_(uint8_t channel);
+  void update_reconnect_suppression_(uint32_t now);
+#endif
 
 #ifdef USE_WIFI_AP
   bool wifi_ap_ip_config_(const optional<ManualIP> &manual_ip);
@@ -923,6 +955,11 @@ class WiFiComponent final : public Component {
   // Relaxed ordering is sufficient: the count value is the only data shared across threads,
   // so no happens-before relationship with other memory needs to be established.
   std::atomic<uint8_t> roaming_suppression_count_{0};
+#endif
+#if defined(USE_ESP32) && defined(USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION)
+  // High byte: saturating request count. Low byte: requested 2.4 GHz channel.
+  std::atomic<uint16_t> reconnect_suppression_state_{0};
+  bool reconnect_suppression_active_{false};
 #endif
 #if USE_NETWORK_IPV6
   uint8_t num_ipv6_addresses_{0};

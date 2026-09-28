@@ -32,6 +32,21 @@ external_components:
 The component keeps the name `wifi` intentionally: it replaces the built-in
 ESPHome component during code generation.
 
+## Optional reconnect-suppression API
+
+An ESP32 component can opt in during code generation:
+
+```python
+from esphome.components import wifi
+
+wifi.enable_runtime_reconnect_suppression()
+```
+
+It may then call `request_reconnect_suppression(channel)` and
+`release_reconnect_suppression()`. The mechanism pauses disconnected STA scan
+and association activity without stopping the WiFi driver. Timing, reconnect
+windows, channel choice, and jitter remain the responsibility of the caller.
+
 ## Development policy
 
 1. Preserve an immutable baseline commit containing only the 2026.7.3 source.
@@ -49,4 +64,3 @@ python -m pytest -q
 
 The baseline test verifies repository layout and the exact upstream file
 hashes. It will intentionally need revision in the first functional commit.
-

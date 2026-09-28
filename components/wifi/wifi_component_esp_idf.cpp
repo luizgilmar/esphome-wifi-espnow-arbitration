@@ -1057,6 +1057,27 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
   return true;
 }
 
+#ifdef USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION
+bool WiFiComponent::wifi_enter_reconnect_suppression_(uint8_t channel) {
+  esp_err_t err = esp_wifi_scan_stop();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
+    ESP_LOGV(TAG, "esp_wifi_scan_stop during reconnect suppression failed: %s", esp_err_to_name(err));
+  }
+
+  err = esp_wifi_disconnect();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
+    ESP_LOGV(TAG, "esp_wifi_disconnect during reconnect suppression failed: %s", esp_err_to_name(err));
+  }
+
+  err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed: %s", channel, esp_err_to_name(err));
+    return false;
+  }
+  return true;
+}
+#endif
+
 #ifdef USE_WIFI_AP
 bool WiFiComponent::wifi_ap_ip_config_(const optional<ManualIP> &manual_ip) {
   esp_err_t err;
