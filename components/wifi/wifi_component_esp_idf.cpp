@@ -1059,14 +1059,21 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
 
 #ifdef USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION
 bool WiFiComponent::wifi_enter_reconnect_suppression_(uint8_t channel) {
+  // restart_adapter() may have disabled STA during cooldown. ESP-NOW needs
+  // WIFI_IF_STA even when no AP is available. Preserve any existing soft AP.
+  if (!this->wifi_mode_(true, {}))
+    return false;
+
   esp_err_t err = esp_wifi_scan_stop();
   if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
     ESP_LOGV(TAG, "esp_wifi_scan_stop during reconnect suppression failed: %s", esp_err_to_name(err));
+    return false;
   }
 
   err = esp_wifi_disconnect();
   if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
     ESP_LOGV(TAG, "esp_wifi_disconnect during reconnect suppression failed: %s", esp_err_to_name(err));
+    return false;
   }
 
   err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);

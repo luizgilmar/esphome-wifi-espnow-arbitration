@@ -962,8 +962,24 @@ void WiFiComponent::update_reconnect_suppression_(uint32_t now) {
   const uint16_t request = this->reconnect_suppression_state_.load(std::memory_order_relaxed);
   const bool requested = (request >> 8) != 0;
 
+  // An explicit disable must never be undone by an outstanding request.
+  if (this->state_ == WIFI_COMPONENT_STATE_DISABLED || this->state_ == WIFI_COMPONENT_STATE_OFF) {
+    this->reconnect_suppression_active_ = false;
+    return;
+  }
+
   if (requested && !this->connected_ && !this->reconnect_suppression_active_ &&
       this->state_ != WIFI_COMPONENT_STATE_DISABLED && this->state_ != WIFI_COMPONENT_STATE_OFF) {
+    // Freeze reconnects BEFORE touching the driver. If cancellation/channel
+    // selection needs another loop, the normal state machine must stay paused.
+    if (this->state_ != WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED) {
+      this->state_ = WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED;
+      this->clear_roaming_state_();
+      this->action_started_ = now - 1000U;
+    }
+    if (now - this->action_started_ < 1000U)
+      return;
+    this->action_started_ = now;
     const uint8_t channel = request & 0xFF;
     if (this->wifi_enter_reconnect_suppression_(channel)) {
       this->reconnect_suppression_active_ = true;
@@ -978,7 +994,8 @@ void WiFiComponent::update_reconnect_suppression_(uint32_t now) {
     return;
   }
 
-  if (this->reconnect_suppression_active_ && (!requested || this->connected_)) {
+  if ((this->reconnect_suppression_active_ || this->state_ == WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED) &&
+      (!requested || this->connected_)) {
     this->reconnect_suppression_active_ = false;
     this->error_from_callback_ = false;
     ESP_LOGI(TAG, "WiFi reconnect suppression released");

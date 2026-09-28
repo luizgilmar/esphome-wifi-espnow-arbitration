@@ -684,6 +684,11 @@ class WiFiComponent final : public Component {
    */
   void release_reconnect_suppression();
 
+  // Main-loop acknowledgement: a request alone does not imply driver readiness.
+  bool is_reconnect_suppression_active() const {
+    return this->reconnect_suppression_active_ && this->state_ == WIFI_COMPONENT_STATE_RECONNECT_SUPPRESSED;
+  }
+
   bool is_reconnect_suppression_requested() const {
     return (this->reconnect_suppression_state_.load(std::memory_order_relaxed) >> 8) != 0;
   }
