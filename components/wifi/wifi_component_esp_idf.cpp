@@ -371,6 +371,10 @@ bool WiFiComponent::wifi_apply_band_mode_() { return esp_wifi_set_band_mode(this
 #endif
 
 bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation() && !this->apply_fixed_channel_policy_())
+    return false; // Never fall back to an unrestricted connect on policy failure.
+#endif
   // enable STA
   if (!this->wifi_mode_(true, {}))
     return false;
@@ -430,6 +434,16 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
   } else {
     conf.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
   }
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation()) {
+    conf.sta.channel = this->fixed_channel_;
+    conf.sta.scan_method = WIFI_FAST_SCAN;
+#ifdef USE_WIFI_11KV_SUPPORT
+    conf.sta.btm_enabled = false;
+    conf.sta.rm_enabled = false;
+#endif
+  }
+#endif
   // Listen interval for ESP32 station to receive beacon when WIFI_PS_MAX_MODEM is set.
   // Units: AP beacon intervals. Defaults to 3 if set to 0.
   conf.sta.listen_interval = 0;
@@ -1061,7 +1075,44 @@ WiFiSTAConnectStatus WiFiComponent::wifi_sta_connect_status_() const {
   }
   return WiFiSTAConnectStatus::IDLE;
 }
+#ifdef USE_WIFI_FIXED_CHANNEL
+bool WiFiComponent::apply_fixed_channel_policy_() {
+  if (this->fixed_channel_applied_) return true;
+  wifi_country_t country{};
+  esp_err_t err = esp_wifi_get_country(&country);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "FC1 get country failed: %s", esp_err_to_name(err));
+    return false;
+  }
+  if (this->fixed_channel_ < country.schan ||
+      this->fixed_channel_ >= country.schan + country.nchan) {
+    ESP_LOGE(TAG, "FC1 channel outside current country range; connection refused");
+    return false;
+  }
+  this->original_country_ = country;
+  country.schan = this->fixed_channel_;
+  country.nchan = 1;
+  country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+  err = esp_wifi_set_country(&country);
+  wifi_country_t actual{};
+  if (err != ESP_OK || esp_wifi_get_country(&actual) != ESP_OK ||
+      actual.schan != country.schan || actual.nchan != 1 || actual.policy != WIFI_COUNTRY_POLICY_MANUAL) {
+    ESP_LOGE(TAG, "FC1 fixed-channel policy failed: %s", esp_err_to_name(err));
+    return false;
+  }
+  this->fixed_channel_applied_ = true;
+  ESP_LOGI(TAG, "FC1 driver range verified start=%u count=1 policy=MANUAL", unsigned(actual.schan));
+  return true;
+}
+#endif
+
 bool WiFiComponent::wifi_scan_start_(bool passive) {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation()) {
+    ESP_LOGW(TAG, "FC1 discovery scan rejected outside configuration mode");
+    return false;
+  }
+#endif
   // enable STA
   if (!this->wifi_mode_(true, {}))
     return false;
@@ -1070,6 +1121,24 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
   config.ssid = nullptr;
   config.bssid = nullptr;
   config.channel = 0;
+  // When every configured network specifies the same channel, honor that
+  // constraint for explicit scans too (including reconnect and roaming scans).
+  // An unspecified channel or mixed channels retain the normal full scan.
+  if (!this->sta_.empty()) {
+    const uint8_t channel = this->sta_.front().get_channel();
+    bool single_channel = this->sta_.front().has_channel() && channel != 0;
+    for (const auto &network : this->sta_) {
+      if (!network.has_channel() || network.get_channel() != channel) {
+        single_channel = false;
+        break;
+      }
+    }
+    if (single_channel)
+      config.channel = channel;
+  }
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->network_configuration_mode_) config.channel = 0;
+#endif
   config.show_hidden = true;
   config.scan_type = passive ? WIFI_SCAN_TYPE_PASSIVE : WIFI_SCAN_TYPE_ACTIVE;
   if (passive) {

@@ -469,10 +469,25 @@ def _fast_connect_schema(value: Any) -> ConfigType:
     return FAST_CONNECT_SCHEMA(value)
 
 
+def _validate_fixed_channel(config):
+    if "fixed_channel" not in config:
+        return config
+    channel = config["fixed_channel"]
+    if config.get("enable_btm") or config.get("enable_rrm"):
+        raise cv.Invalid("fixed_channel requires enable_btm: false and enable_rrm: false")
+    for network in config.get("networks", []):
+        if network.get("channel", channel) != channel:
+            raise cv.Invalid("Network channel must match fixed_channel")
+    if config.get("ap", {}).get("channel", channel) != channel:
+        raise cv.Invalid("Configuration AP channel must match fixed_channel")
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(WiFiComponent),
+            cv.Optional("fixed_channel"): cv.All(cv.only_on_esp32, cv.int_range(min=1, max=1)),
             cv.Optional(CONF_NETWORKS): cv.All(
                 cv.ensure_list(WIFI_NETWORK_STA), cv.Length(max=MAX_WIFI_NETWORKS)
             ),
@@ -532,6 +547,7 @@ CONFIG_SCHEMA = cv.All(
     ),
     _apply_min_auth_mode_default,
     _validate,
+    _validate_fixed_channel,
     _report_provisioning_credentials,
 )
 
@@ -603,6 +619,9 @@ def wifi_network(config, ap, static_ip):
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     add_use_address(var, config[CONF_USE_ADDRESS])
+    if "fixed_channel" in config:
+        cg.add_define("USE_WIFI_FIXED_CHANNEL")
+        cg.add(var.set_fixed_channel(config["fixed_channel"]))
 
     # Track if any network uses Enterprise authentication
     has_eap = False

@@ -16,6 +16,9 @@
 #endif
 #include "esphome/core/string_ref.h"
 
+#ifdef USE_WIFI_FIXED_CHANNEL
+#include <esp_wifi_types.h>
+#endif
 #include <atomic>
 #include <limits>
 #include <span>
@@ -439,6 +442,12 @@ class WiFiComponent final : public Component {
  public:
   /// Construct a WiFiComponent.
   WiFiComponent();
+#ifdef USE_WIFI_FIXED_CHANNEL
+  void set_fixed_channel(uint8_t channel) { fixed_channel_ = channel; }
+  bool fixed_channel_operation() const { return fixed_channel_ != 0 && !network_configuration_mode_; }
+  bool network_configuration_mode() const { return network_configuration_mode_; }
+  bool enter_network_configuration();
+#endif
 
   void set_sta(const WiFiAP &ap);
   // Returns a copy of the currently selected AP configuration
@@ -803,6 +812,16 @@ class WiFiComponent final : public Component {
   bool wifi_sta_ip_config_(const optional<ManualIP> &manual_ip);
   bool wifi_apply_hostname_();
   bool wifi_sta_connect_(const WiFiAP &ap);
+#ifdef USE_WIFI_FIXED_CHANNEL
+  bool apply_fixed_channel_policy_();
+  uint8_t fixed_channel_{0};
+  bool fixed_channel_applied_{false};
+  bool network_configuration_mode_{false};
+  bool fixed_retry_pending_{false};
+  uint32_t fixed_retry_started_{0};
+  size_t fixed_retry_index_{0};
+  wifi_country_t original_country_{};
+#endif
   void wifi_pre_setup_();
 #ifdef USE_ESP32
   // ESP-IDF only: defers esp_wifi_init() + netif creation (which allocate ~15-30KB of

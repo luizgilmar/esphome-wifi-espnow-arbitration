@@ -1,4 +1,7 @@
 #include "wifi_component.h"
+#ifdef USE_WIFI_FIXED_CHANNEL
+#include <esp_wifi.h>
+#endif
 #ifdef USE_WIFI
 #include <cassert>
 #include <cinttypes>
@@ -696,6 +699,15 @@ void WiFiComponent::start() {
     }
 
     this->transition_to_phase_(WiFiRetryPhase::INITIAL_CONNECT);
+#ifdef USE_WIFI_FIXED_CHANNEL
+    if (this->fixed_channel_operation()) {
+      this->post_connect_roaming_ = false;
+      this->selected_sta_index_ = 0;
+      this->start_connecting(this->sta_[0]);
+      this->wifi_apply_hostname_();
+      return;
+    }
+#endif
 #ifdef USE_WIFI_FAST_CONNECT
     WiFiAP params;
     bool loaded_fast_connect = this->load_fast_connect_settings_(params);
@@ -744,7 +756,12 @@ void WiFiComponent::start() {
 
 void WiFiComponent::restart_adapter() {
   ESP_LOGW(TAG, "Restarting adapter");
-  this->wifi_mode_(false, {});
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation())
+    this->wifi_disconnect_();
+  else
+#endif
+    this->wifi_mode_(false, {});
   // Clear error flag here because restart_adapter() enters COOLDOWN state,
   // and check_connecting_finished() is called after cooldown without going
   // through start_connecting() first. Without this clear, stale errors would
@@ -786,6 +803,18 @@ void WiFiComponent::loop() {
     this->update_reconnect_suppression_(now);
 #endif
 
+#ifdef USE_WIFI_FIXED_CHANNEL
+    if (this->fixed_channel_operation() && this->fixed_retry_pending_) {
+      if (!this->is_disabled() && now - this->fixed_retry_started_ >= 10000U && !this->sta_.empty()) {
+        this->fixed_retry_pending_ = false;
+        this->selected_sta_index_ = this->fixed_retry_index_++ % this->sta_.size();
+        this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
+        this->num_retried_ = 0;
+        // Use credentials, never an anonymous hidden scan result or stale BSSID cache.
+        this->start_connecting(this->sta_[this->selected_sta_index_]);
+      }
+    } else
+#endif
     switch (this->state_) {
       case WIFI_COMPONENT_STATE_COOLDOWN: {
         this->status_set_warning(LOG_STR("waiting to reconnect"));
@@ -854,7 +883,11 @@ void WiFiComponent::loop() {
     }
 
 #ifdef USE_WIFI_AP
-    if (this->has_ap() && !this->ap_setup_) {
+    if (this->has_ap() && !this->ap_setup_
+#ifdef USE_WIFI_FIXED_CHANNEL
+        && !this->fixed_channel_operation()
+#endif
+    ) {
       if (this->ap_timeout_ != 0 && (now - this->last_connected_ > this->ap_timeout_)) {
         ESP_LOGI(TAG, "Starting fallback AP");
         this->setup_ap_config_();
@@ -1412,7 +1445,38 @@ void WiFiComponent::disable() {
 
 bool WiFiComponent::is_disabled() { return this->state_ == WIFI_COMPONENT_STATE_DISABLED; }
 
+#ifdef USE_WIFI_FIXED_CHANNEL
+bool WiFiComponent::enter_network_configuration() {
+#ifdef USE_CAPTIVE_PORTAL
+  if (this->network_configuration_mode_) return true;
+  if (!this->has_ap() || captive_portal::global_captive_portal == nullptr ||
+      !this->fixed_channel_applied_ || this->is_disabled()) return false;
+  this->wifi_disconnect_();
+  if (esp_wifi_set_country(&this->original_country_) != ESP_OK) {
+    ESP_LOGE(TAG, "FC1 failed to restore configuration channel range");
+    return false;
+  }
+  this->network_configuration_mode_ = true;
+  this->fixed_retry_pending_ = false;
+  this->error_from_callback_ = false;
+  this->setup_ap_config_();
+  captive_portal::global_captive_portal->start();
+  ESP_LOGW(TAG, "FC1 CONFIGURATION mode; restart to return to fixed channel; ESP-NOW not guaranteed here");
+  this->start_scanning();
+  return true;
+#else
+  return false;
+#endif
+}
+#endif
+
 void WiFiComponent::start_scanning() {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation()) {
+    this->retry_connect();
+    return;
+  }
+#endif
   this->action_started_ = millis();
   ESP_LOGD(TAG, "Starting scan");
   this->wifi_scan_start_(this->passive_scan_);
@@ -2229,6 +2293,21 @@ void WiFiComponent::advance_to_next_target_or_increment_retry_() {
 }
 
 void WiFiComponent::retry_connect() {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation()) {
+    if (this->is_disabled()) return;
+    if (!this->fixed_retry_pending_) {
+      this->wifi_disconnect_();
+      this->fixed_retry_started_ = millis();
+      this->fixed_retry_pending_ = true;
+      this->error_from_callback_ = false;
+      this->state_ = WIFI_COMPONENT_STATE_COOLDOWN;
+      this->action_started_ = this->fixed_retry_started_;
+      ESP_LOGI(TAG, "FC1 retry in 10000ms; driver kept running, no discovery scan");
+    }
+    return;
+  }
+#endif
   // Handle roaming state transitions - preserve attempts counter to prevent ping-pong
   // to unreachable APs after ROAMING_MAX_ATTEMPTS failures
   if (this->roaming_state_ == RoamingState::CONNECTING) {
