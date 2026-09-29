@@ -23,6 +23,12 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(USE_ESP32) && defined(USE_WIFI_RADIO_DIAGNOSTICS)
+#include "radio_diagnostics.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/log.h"
+#endif
+
 #ifdef USE_LIBRETINY
 #include <WiFi.h>
 #endif
@@ -692,6 +698,20 @@ class WiFiComponent final : public Component {
   bool is_reconnect_suppression_requested() const {
     return (this->reconnect_suppression_state_.load(std::memory_order_relaxed) >> 8) != 0;
   }
+
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+  // Diagnostic access is main-loop only. No network activity or driver mutation.
+  RadioDiagnosticWifiState radio_diagnostic_state() const;
+  const RadioDiagnosticEvents &radio_diagnostic_events() const { return this->radio_diagnostic_events_; }
+  void record_radio_diagnostic_event(RadioDiagnosticEventKind kind, int32_t result = 0, uint16_t detail = 0) {
+    const uint32_t now = millis();
+    this->radio_diagnostic_events_.push({now, result, kind, detail});
+    ESP_LOGI("radio_diag.event", "up=%u kind=%s result=%d detail=%u", static_cast<unsigned>(now),
+             radio_diagnostic_event_name(kind), static_cast<int>(result), static_cast<unsigned>(detail));
+    if (kind == RadioDiagnosticEventKind::WIFI_STOP_CALL) ++this->radio_diagnostic_stop_calls_;
+    if (kind == RadioDiagnosticEventKind::DISCONNECTED) this->radio_diagnostic_disconnect_reason_ = detail;
+  }
+#endif  // USE_WIFI_RADIO_DIAGNOSTICS
 #endif  // USE_ESP32 && USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION
 
  protected:
@@ -965,6 +985,11 @@ class WiFiComponent final : public Component {
   // High byte: saturating request count. Low byte: requested 2.4 GHz channel.
   std::atomic<uint16_t> reconnect_suppression_state_{0};
   bool reconnect_suppression_active_{false};
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+  RadioDiagnosticEvents radio_diagnostic_events_{};
+  uint32_t radio_diagnostic_stop_calls_{0};
+  uint16_t radio_diagnostic_disconnect_reason_{0};
+#endif
 #endif
 #if USE_NETWORK_IPV6
   uint8_t num_ipv6_addresses_{0};

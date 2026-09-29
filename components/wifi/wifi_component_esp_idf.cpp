@@ -131,7 +131,7 @@ void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, voi
     return;
   }
 
-  // copy to heap — WiFi events are rare so heap alloc is fine
+  // copy to heap â€” WiFi events are rare so heap alloc is fine
   auto *to_send = new IDFWiFiEvent;  // NOLINT(cppcoreguidelines-owning-memory)
   memcpy(to_send, &event, sizeof(IDFWiFiEvent));
   if (!global_wifi_component->event_queue_.push(to_send)) {
@@ -205,7 +205,13 @@ void WiFiComponent::wifi_lazy_init_() {
   wifi_mode_t mode;
   if (esp_wifi_get_mode(&mode) == ESP_OK) {
     ESP_LOGD(TAG, "WiFi driver already started without STA netif; restarting to bind it");
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_STOP_CALL);
+#endif
     esp_err_t err = esp_wifi_stop();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_STOP_RESULT, err, 0);
+#endif
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "esp_wifi_stop failed: %s", esp_err_to_name(err));
     }
@@ -217,6 +223,9 @@ void WiFiComponent::wifi_lazy_init_() {
       ESP_LOGW(TAG, "esp_wifi_set_storage failed: %s", esp_err_to_name(err));
     }
     err = esp_wifi_start();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_START_RESULT, err, 0);
+#endif
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
       return;
@@ -286,7 +295,13 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
   }
 
   if (set_mode == WIFI_MODE_NULL && s_wifi_started) {
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_STOP_CALL);
+#endif
     err = esp_wifi_stop();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_STOP_RESULT, err, 0);
+#endif
     if (err != ESP_OK) {
       ESP_LOGV(TAG, "esp_wifi_stop failed: %s", esp_err_to_name(err));
       return false;
@@ -296,6 +311,9 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
   }
 
   err = esp_wifi_set_mode(set_mode);
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_MODE_RESULT, err, static_cast<uint16_t>(set_mode));
+#endif
   if (err != ERR_OK) {
     ESP_LOGW(TAG, "esp_wifi_set_mode failed: %s", esp_err_to_name(err));
     return false;
@@ -303,6 +321,9 @@ bool WiFiComponent::wifi_mode_(optional<bool> sta, optional<bool> ap) {
 
   if (set_mode != WIFI_MODE_NULL && !s_wifi_started) {
     err = esp_wifi_start();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::WIFI_START_RESULT, err, 0);
+#endif
     if (err != ESP_OK) {
       ESP_LOGV(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
       return false;
@@ -768,7 +789,7 @@ const char *get_disconnect_reason_str(uint8_t reason) {
 }
 
 bool WiFiComponent::wifi_loop_() {
-  // Use pop() directly instead of empty() — pop() costs 1 memw (acquire on tail_),
+  // Use pop() directly instead of empty() â€” pop() costs 1 memw (acquire on tail_),
   // while empty() costs 2 memw (acquire on both head_ and tail_) on Xtensa.
   IDFWiFiEvent *data = this->event_queue_.pop();
   if (data == nullptr)
@@ -801,6 +822,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
     }
 
     s_sta_started = true;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::STA_START, 0, 0);
+#endif
     // re-apply power save mode
     wifi_apply_power_save_();
 #ifdef SOC_WIFI_SUPPORT_5G
@@ -810,6 +834,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
   } else if (data->event_base == WIFI_EVENT && data->event_id == WIFI_EVENT_STA_STOP) {
     ESP_LOGV(TAG, "STA stop");
     s_sta_started = false;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::STA_STOP, 0, 0);
+#endif
     s_sta_connecting = false;
 
   } else if (data->event_base == WIFI_EVENT && data->event_id == WIFI_EVENT_STA_AUTHMODE_CHANGE) {
@@ -825,6 +852,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
              (const char *) it.ssid, bssid_buf, it.channel, get_auth_mode_str(it.authmode));
 #endif
     s_sta_connected = true;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::ASSOCIATED, 0, it.channel);
+#endif
 #ifdef USE_WIFI_CONNECT_STATE_LISTENERS
     // Defer listener notification until state machine reaches STA_CONNECTED
     // This ensures wifi.connected condition returns true in listener automations
@@ -839,6 +869,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
 
   } else if (data->event_base == WIFI_EVENT && data->event_id == WIFI_EVENT_STA_DISCONNECTED) {
     const auto &it = data->data.sta_disconnected;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::DISCONNECTED, 0, it.reason);
+#endif
     if (it.reason == WIFI_REASON_NO_AP_FOUND) {
       ESP_LOGW(TAG, "Disconnected ssid='%.*s' reason='Probe Request Unsuccessful'", it.ssid_len,
                (const char *) it.ssid);
@@ -869,6 +902,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
 #endif /* USE_NETWORK_IPV6 */
     ESP_LOGV(TAG, "static_ip=" IPSTR " gateway=" IPSTR, IP2STR(&it.ip_info.ip), IP2STR(&it.ip_info.gw));
     this->got_ipv4_address_ = true;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::GOT_IP, 0, 0);
+#endif
 #ifdef USE_WIFI_IP_STATE_LISTENERS
     this->notify_ip_state_listeners_();
 #endif
@@ -886,6 +922,9 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
   } else if (data->event_base == IP_EVENT && data->event_id == IP_EVENT_STA_LOST_IP) {
     ESP_LOGV(TAG, "Lost IP");
     this->got_ipv4_address_ = false;
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::LOST_IP, 0, 0);
+#endif
 
   } else if (data->event_base == WIFI_EVENT && data->event_id == WIFI_EVENT_SCAN_DONE) {
     const auto &it = data->data.sta_scan_done;
@@ -1048,6 +1087,9 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
 #endif
 
   esp_err_t err = esp_wifi_scan_start(&config, false);
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+    this->record_radio_diagnostic_event(RadioDiagnosticEventKind::SCAN_START_RESULT, err, config.channel);
+#endif
   if (err != ESP_OK) {
     ESP_LOGV(TAG, "esp_wifi_scan_start failed: %s", esp_err_to_name(err));
     return false;
@@ -1057,6 +1099,20 @@ bool WiFiComponent::wifi_scan_start_(bool passive) {
   return true;
 }
 
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+RadioDiagnosticWifiState WiFiComponent::radio_diagnostic_state() const {
+  RadioDiagnosticWifiState result{};
+  result.state = static_cast<uint8_t>(this->state_);
+  result.driver_started = s_wifi_started;
+  result.sta_started = s_sta_started;
+  result.connecting = s_sta_connecting;
+  result.last_disconnect_reason = this->radio_diagnostic_disconnect_reason_;
+  result.stop_calls = this->radio_diagnostic_stop_calls_;
+  return result;
+}
+
+#endif  // USE_WIFI_RADIO_DIAGNOSTICS
+
 #ifdef USE_WIFI_RUNTIME_RECONNECT_SUPPRESSION
 bool WiFiComponent::wifi_enter_reconnect_suppression_(uint8_t channel) {
   // restart_adapter() may have disabled STA during cooldown. ESP-NOW needs
@@ -1065,18 +1121,27 @@ bool WiFiComponent::wifi_enter_reconnect_suppression_(uint8_t channel) {
     return false;
 
   esp_err_t err = esp_wifi_scan_stop();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+  this->record_radio_diagnostic_event(RadioDiagnosticEventKind::SCAN_STOP_RESULT, err, 0);
+#endif
   if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
     ESP_LOGV(TAG, "esp_wifi_scan_stop during reconnect suppression failed: %s", esp_err_to_name(err));
     return false;
   }
 
   err = esp_wifi_disconnect();
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+  this->record_radio_diagnostic_event(RadioDiagnosticEventKind::DISCONNECT_RESULT, err, 0);
+#endif
   if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
     ESP_LOGV(TAG, "esp_wifi_disconnect during reconnect suppression failed: %s", esp_err_to_name(err));
     return false;
   }
 
   err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+#ifdef USE_WIFI_RADIO_DIAGNOSTICS
+  this->record_radio_diagnostic_event(RadioDiagnosticEventKind::SET_CHANNEL_RESULT, err, channel);
+#endif
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "esp_wifi_set_channel(%u) failed: %s", channel, esp_err_to_name(err));
     return false;

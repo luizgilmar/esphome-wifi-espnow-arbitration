@@ -23,6 +23,7 @@ def test_external_component_layout_is_complete() -> None:
     expected = {
         "__init__.py",
         "automation.h",
+        "radio_diagnostics.h",
         "wifi_component.cpp",
         "wifi_component.h",
         "wifi_component_esp_idf.cpp",
