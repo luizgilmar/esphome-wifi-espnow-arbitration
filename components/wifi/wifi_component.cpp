@@ -812,7 +812,9 @@ void WiFiComponent::loop() {
         this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
         this->num_retried_ = 0;
         // Use credentials, never an anonymous hidden scan result or stale BSSID cache.
+        if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("before_attempt");
         this->start_connecting(this->sta_[this->selected_sta_index_]);
+        if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("after_connect_call");
       }
     } else
 #endif
@@ -2298,7 +2300,9 @@ void WiFiComponent::retry_connect() {
   if (this->fixed_channel_operation()) {
     if (this->is_disabled()) return;
     if (!this->fixed_retry_pending_) {
+      if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("retry_before_disconnect");
       this->wifi_disconnect_();
+      if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("retry_after_disconnect");
       this->fixed_retry_started_ = millis();
       this->fixed_retry_pending_ = true;
       this->error_from_callback_ = false;

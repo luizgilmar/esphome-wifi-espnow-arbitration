@@ -445,6 +445,7 @@ class WiFiComponent final : public Component {
 #ifdef USE_WIFI_FIXED_CHANNEL
   void set_fixed_channel(uint8_t channel) { fixed_channel_ = channel; }
   void set_fixed_channel_retry_interval(uint32_t interval) { fixed_retry_interval_ms_ = interval; }
+  void set_fixed_channel_probe(void (*probe)(const char *)) { fixed_channel_probe_ = probe; }
   bool fixed_channel_operation() const { return fixed_channel_ != 0 && !network_configuration_mode_; }
   bool network_configuration_mode() const { return network_configuration_mode_; }
   bool enter_network_configuration();
@@ -821,6 +822,7 @@ class WiFiComponent final : public Component {
   bool fixed_retry_pending_{false};
   uint32_t fixed_retry_started_{0};
   uint32_t fixed_retry_interval_ms_{10000};
+  void (*fixed_channel_probe_)(const char *){nullptr};
   size_t fixed_retry_index_{0};
   wifi_country_t original_country_{};
 #endif
