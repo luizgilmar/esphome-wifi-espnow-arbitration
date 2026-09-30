@@ -16,6 +16,26 @@ def test_legacy_configuration_is_unchanged():
     config = {"enable_rrm": True, "networks": [{"channel": 6}]}
     assert validator()(config) is config
 
+def test_retry_interval_accepts_bounds_and_bench_value():
+    for milliseconds in (10000, 120000, 300000):
+        config = {"fixed_channel": 1, "fixed_channel_retry_interval": SimpleNamespace(total_milliseconds=milliseconds)}
+        assert validator()(config) is config
+
+def test_retry_interval_rejects_out_of_bounds():
+    for milliseconds in (0, 9999, 300001):
+        try:
+            validator()({"fixed_channel": 1, "fixed_channel_retry_interval": SimpleNamespace(total_milliseconds=milliseconds)})
+        except ValueError:
+            continue
+        raise AssertionError(f"Accepted out-of-bounds retry: {milliseconds}")
+
+def test_retry_interval_requires_fixed_channel():
+    try:
+        validator()({"fixed_channel_retry_interval": SimpleNamespace(total_milliseconds=120000)})
+    except ValueError:
+        return
+    raise AssertionError("Accepted retry interval without fixed channel")
+
 def test_fixed_channel_accepts_saved_credentials_without_channel():
     config = {"fixed_channel": 1, "networks": [{"ssid": "lab"}], "ap": {"channel": 1}}
     assert validator()(config) is config

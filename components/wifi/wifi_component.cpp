@@ -805,8 +805,9 @@ void WiFiComponent::loop() {
 
 #ifdef USE_WIFI_FIXED_CHANNEL
     if (this->fixed_channel_operation() && this->fixed_retry_pending_) {
-      if (!this->is_disabled() && now - this->fixed_retry_started_ >= 10000U && !this->sta_.empty()) {
+      if (!this->is_disabled() && now - this->fixed_retry_started_ >= this->fixed_retry_interval_ms_ && !this->sta_.empty()) {
         this->fixed_retry_pending_ = false;
+        ESP_LOGI(TAG, "FC2 retry starting after %ums; observe ESP-NOW reception", (unsigned) (now - this->fixed_retry_started_));
         this->selected_sta_index_ = this->fixed_retry_index_++ % this->sta_.size();
         this->retry_phase_ = WiFiRetryPhase::INITIAL_CONNECT;
         this->num_retried_ = 0;
@@ -2303,7 +2304,7 @@ void WiFiComponent::retry_connect() {
       this->error_from_callback_ = false;
       this->state_ = WIFI_COMPONENT_STATE_COOLDOWN;
       this->action_started_ = this->fixed_retry_started_;
-      ESP_LOGI(TAG, "FC1 retry in 10000ms; driver kept running, no discovery scan");
+      ESP_LOGI(TAG, "FC2 retry in %ums; driver kept running, no discovery scan", (unsigned) this->fixed_retry_interval_ms_);
     }
     return;
   }

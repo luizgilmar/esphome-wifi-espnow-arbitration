@@ -470,6 +470,12 @@ def _fast_connect_schema(value: Any) -> ConfigType:
 
 
 def _validate_fixed_channel(config):
+    if "fixed_channel_retry_interval" in config:
+        if "fixed_channel" not in config:
+            raise cv.Invalid("fixed_channel_retry_interval requires fixed_channel")
+        interval = config["fixed_channel_retry_interval"].total_milliseconds
+        if not 10000 <= interval <= 300000:
+            raise cv.Invalid("fixed_channel_retry_interval must be between 10s and 5min")
     if "fixed_channel" not in config:
         return config
     channel = config["fixed_channel"]
@@ -488,6 +494,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(WiFiComponent),
             cv.Optional("fixed_channel"): cv.All(cv.only_on_esp32, cv.int_range(min=1, max=1)),
+            cv.Optional("fixed_channel_retry_interval"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_NETWORKS): cv.All(
                 cv.ensure_list(WIFI_NETWORK_STA), cv.Length(max=MAX_WIFI_NETWORKS)
             ),
@@ -622,6 +629,8 @@ async def to_code(config):
     if "fixed_channel" in config:
         cg.add_define("USE_WIFI_FIXED_CHANNEL")
         cg.add(var.set_fixed_channel(config["fixed_channel"]))
+        if "fixed_channel_retry_interval" in config:
+            cg.add(var.set_fixed_channel_retry_interval(config["fixed_channel_retry_interval"].total_milliseconds))
 
     # Track if any network uses Enterprise authentication
     has_eap = False
