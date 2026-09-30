@@ -460,6 +460,7 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
   wifi_config_t current_conf{};
   esp_err_t err;
   err = esp_wifi_get_config(WIFI_IF_STA, &current_conf);
+  const bool config_read_ok = err == ESP_OK;
   if (err != ERR_OK) {
     ESP_LOGW(TAG, "esp_wifi_get_config failed: %s", esp_err_to_name(err));
     // can continue
@@ -477,18 +478,42 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
   bool skip_set_config = false;
 #ifdef USE_WIFI_FIXED_CHANNEL
   const bool config_trial = this->fixed_channel_operation() && this->skip_unchanged_sta_config_;
-  skip_set_config = config_trial && config_equal;
+  const bool requested_equal = this->last_applied_sta_config_valid_ &&
+      memcmp(&this->last_applied_sta_config_, &conf, sizeof(conf)) == 0;
+  skip_set_config = config_trial && config_read_ok && requested_equal;
   if (config_trial) {
-    ESP_LOGI(TAG, "FC3 STA config_equal=%d set_config=%s", int(config_equal), skip_set_config ? "SKIP" : "APPLY");
+    ESP_LOGI(TAG, "FC4 STA requested_equal=%d driver_equal=%d read_ok=%d set_config=%s",
+             int(requested_equal), int(config_equal), int(config_read_ok), skip_set_config ? "SKIP" : "APPLY");
+    if (config_read_ok && !config_equal) {
+      ESP_LOGI(TAG, "FC4 driver_diff ssid=%d password=%d bssid_set=%d bssid=%d channel=%d scan_method=%d authmode=%d rssi=%d listen=%d pmf_capable=%d pmf_required=%d; 1=different, values hidden",
+               int(memcmp(current_conf.sta.ssid, conf.sta.ssid, sizeof(conf.sta.ssid)) != 0),
+               int(memcmp(current_conf.sta.password, conf.sta.password, sizeof(conf.sta.password)) != 0),
+               int(current_conf.sta.bssid_set != conf.sta.bssid_set),
+               int(memcmp(current_conf.sta.bssid, conf.sta.bssid, sizeof(conf.sta.bssid)) != 0),
+               int(current_conf.sta.channel != conf.sta.channel), int(current_conf.sta.scan_method != conf.sta.scan_method),
+               int(current_conf.sta.threshold.authmode != conf.sta.threshold.authmode),
+               int(current_conf.sta.threshold.rssi != conf.sta.threshold.rssi),
+               int(current_conf.sta.listen_interval != conf.sta.listen_interval),
+               int(current_conf.sta.pmf_cfg.capable != conf.sta.pmf_cfg.capable),
+               int(current_conf.sta.pmf_cfg.required != conf.sta.pmf_cfg.required));
+    }
     if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("before_set_config_decision");
   }
 #endif
   if (!skip_set_config) {
     err = esp_wifi_set_config(WIFI_IF_STA, &conf);
     if (err != ESP_OK) {
+#ifdef USE_WIFI_FIXED_CHANNEL
+      this->last_applied_sta_config_valid_ = false;
+#endif
       ESP_LOGV(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
       return false;
     }
+#ifdef USE_WIFI_FIXED_CHANNEL
+    // Cache our exact request, not the driver-normalized representation.
+    memcpy(&this->last_applied_sta_config_, &conf, sizeof(conf));
+    this->last_applied_sta_config_valid_ = true;
+#endif
   }
 #ifdef USE_WIFI_FIXED_CHANNEL
   if (config_trial && this->fixed_channel_probe_ != nullptr)

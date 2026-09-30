@@ -825,6 +825,8 @@ class WiFiComponent final : public Component {
   uint32_t fixed_retry_interval_ms_{10000};
   void (*fixed_channel_probe_)(const char *){nullptr};
   bool skip_unchanged_sta_config_{false};
+  wifi_config_t last_applied_sta_config_{};
+  bool last_applied_sta_config_valid_{false};
   size_t fixed_retry_index_{0};
   wifi_country_t original_country_{};
 #endif
