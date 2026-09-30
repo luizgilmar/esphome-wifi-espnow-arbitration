@@ -457,7 +457,7 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
   // The minimum rssi to accept in the fast scan mode
   conf.sta.threshold.rssi = -127;
 
-  wifi_config_t current_conf;
+  wifi_config_t current_conf{};
   esp_err_t err;
   err = esp_wifi_get_config(WIFI_IF_STA, &current_conf);
   if (err != ERR_OK) {
@@ -465,7 +465,8 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
     // can continue
   }
 
-  if (memcmp(&current_conf, &conf, sizeof(wifi_config_t)) != 0) {  // NOLINT
+  const bool config_equal = err == ESP_OK && memcmp(&current_conf, &conf, sizeof(wifi_config_t)) == 0;
+  if (!config_equal) {
     err = esp_wifi_disconnect();
     if (err != ESP_OK) {
       ESP_LOGV(TAG, "esp_wifi_disconnect failed: %s", esp_err_to_name(err));
@@ -473,11 +474,26 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
     }
   }
 
-  err = esp_wifi_set_config(WIFI_IF_STA, &conf);
-  if (err != ESP_OK) {
-    ESP_LOGV(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
-    return false;
+  bool skip_set_config = false;
+#ifdef USE_WIFI_FIXED_CHANNEL
+  const bool config_trial = this->fixed_channel_operation() && this->skip_unchanged_sta_config_;
+  skip_set_config = config_trial && config_equal;
+  if (config_trial) {
+    ESP_LOGI(TAG, "FC3 STA config_equal=%d set_config=%s", int(config_equal), skip_set_config ? "SKIP" : "APPLY");
+    if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("before_set_config_decision");
   }
+#endif
+  if (!skip_set_config) {
+    err = esp_wifi_set_config(WIFI_IF_STA, &conf);
+    if (err != ESP_OK) {
+      ESP_LOGV(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
+      return false;
+    }
+  }
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (config_trial && this->fixed_channel_probe_ != nullptr)
+    this->fixed_channel_probe_(skip_set_config ? "after_set_config_skip" : "after_set_config_apply");
+#endif
 
 #ifdef USE_WIFI_MANUAL_IP
   if (!this->wifi_sta_ip_config_(ap.get_manual_ip())) {
