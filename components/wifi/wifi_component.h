@@ -448,6 +448,7 @@ class WiFiComponent final : public Component {
   void set_fixed_channel_probe(void (*probe)(const char *)) { fixed_channel_probe_ = probe; }
   void set_skip_unchanged_sta_config(bool enabled) { skip_unchanged_sta_config_ = enabled; }
   void set_skip_disconnected_sta_disconnect(bool enabled) { skip_disconnected_sta_disconnect_ = enabled; }
+  void set_adaptive_fixed_retry(bool enabled) { adaptive_fixed_retry_ = enabled; }
   bool fixed_channel_operation() const { return fixed_channel_ != 0 && !network_configuration_mode_; }
   bool network_configuration_mode() const { return network_configuration_mode_; }
   bool enter_network_configuration();
@@ -827,6 +828,10 @@ class WiFiComponent final : public Component {
   void (*fixed_channel_probe_)(const char *){nullptr};
   bool skip_unchanged_sta_config_{false};
   bool skip_disconnected_sta_disconnect_{false};
+  bool adaptive_fixed_retry_{false};
+  uint8_t adaptive_retry_stage_{0};
+  bool adaptive_stable_tracking_{false};
+  uint32_t adaptive_stable_since_{0};
   bool should_skip_sta_disconnect_(const char *phase);
   wifi_config_t last_applied_sta_config_{};
   bool last_applied_sta_config_valid_{false};

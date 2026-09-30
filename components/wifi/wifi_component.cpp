@@ -804,6 +804,19 @@ void WiFiComponent::loop() {
 #endif
 
 #ifdef USE_WIFI_FIXED_CHANNEL
+    if (this->fixed_channel_operation() && this->adaptive_fixed_retry_) {
+      if (this->is_connected()) {
+        if (!this->adaptive_stable_tracking_) {
+          this->adaptive_stable_tracking_ = true;
+          this->adaptive_stable_since_ = now;
+        } else if (this->adaptive_retry_stage_ != 0 && uint32_t(now - this->adaptive_stable_since_) >= 30000U) {
+          this->adaptive_retry_stage_ = 0;
+          ESP_LOGI(TAG, "RC1 stable for 30s; fast retry sequence rearmed");
+        }
+      } else {
+        this->adaptive_stable_tracking_ = false;
+      }
+    }
     if (this->fixed_channel_operation() && this->fixed_retry_pending_) {
       if (!this->is_disabled() && now - this->fixed_retry_started_ >= this->fixed_retry_interval_ms_ && !this->sta_.empty()) {
         this->fixed_retry_pending_ = false;
@@ -2304,6 +2317,14 @@ void WiFiComponent::retry_connect() {
       this->wifi_disconnect_();
       if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("retry_after_disconnect");
       this->fixed_retry_started_ = millis();
+      this->adaptive_stable_tracking_ = false;
+      if (this->adaptive_fixed_retry_) {
+        static constexpr uint32_t RETRY_DELAYS[] = {1000U, 5000U, 15000U, 60000U};
+        this->fixed_retry_interval_ms_ = RETRY_DELAYS[this->adaptive_retry_stage_];
+        ESP_LOGI(TAG, "RC1 retry stage=%u delay_ms=%u", unsigned(this->adaptive_retry_stage_),
+                 unsigned(this->fixed_retry_interval_ms_));
+        if (this->adaptive_retry_stage_ < 3) ++this->adaptive_retry_stage_;
+      }
       this->fixed_retry_pending_ = true;
       this->error_from_callback_ = false;
       this->state_ = WIFI_COMPONENT_STATE_COOLDOWN;
