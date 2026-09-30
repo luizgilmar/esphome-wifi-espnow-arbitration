@@ -468,7 +468,11 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
 
   const bool config_equal = err == ESP_OK && memcmp(&current_conf, &conf, sizeof(wifi_config_t)) == 0;
   if (!config_equal) {
-    err = esp_wifi_disconnect();
+    bool skip_disconnect = false;
+#ifdef USE_WIFI_FIXED_CHANNEL
+    skip_disconnect = this->should_skip_sta_disconnect_("before_connect");
+#endif
+    err = skip_disconnect ? ESP_OK : esp_wifi_disconnect();
     if (err != ESP_OK) {
       ESP_LOGV(TAG, "esp_wifi_disconnect failed: %s", esp_err_to_name(err));
       return false;
@@ -1404,7 +1408,25 @@ network::IPAddress WiFiComponent::wifi_soft_ap_ip() {
 }
 #endif  // USE_WIFI_AP
 
-bool WiFiComponent::wifi_disconnect_() { return esp_wifi_disconnect(); }
+#ifdef USE_WIFI_FIXED_CHANNEL
+bool WiFiComponent::should_skip_sta_disconnect_(const char *phase) {
+  if (!this->fixed_channel_operation() || !this->skip_disconnected_sta_disconnect_) return false;
+  wifi_ap_record_t ap{};
+  const auto result = esp_wifi_sta_get_ap_info(&ap);
+  // Do not suppress cancellation of an active connection attempt or uncertain driver state.
+  const bool skip = result == ESP_ERR_WIFI_NOT_CONNECT && !s_sta_connecting && !s_sta_connected;
+  ESP_LOGI(TAG, "FC5 phase=%s ap_info_error=%d connecting=%d associated=%d disconnect=%s",
+           phase, int(result), int(s_sta_connecting), int(s_sta_connected), skip ? "SKIP" : "CALL");
+  return skip;
+}
+#endif
+
+bool WiFiComponent::wifi_disconnect_() {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->should_skip_sta_disconnect_("disconnect_helper")) return ESP_OK;
+#endif
+  return esp_wifi_disconnect();
+}
 
 bssid_t WiFiComponent::wifi_bssid() {
   bssid_t bssid{};
