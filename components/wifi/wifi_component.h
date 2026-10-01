@@ -445,6 +445,11 @@ class WiFiComponent final : public Component {
 #ifdef USE_WIFI_FIXED_CHANNEL
   void set_fixed_channel(uint8_t channel) { fixed_channel_ = channel; }
   void set_fixed_channel_retry_interval(uint32_t interval) { fixed_retry_interval_ms_ = interval; }
+  // Internal consumer, installed during code generation before component setup.
+  void set_fixed_channel_recovery_listener(void *context, void (*listener)(void *, const char *)) {
+    fixed_recovery_context_ = context;
+    fixed_recovery_listener_ = listener;
+  }
   void set_fixed_channel_probe(void (*probe)(const char *)) { fixed_channel_probe_ = probe; }
   void set_skip_unchanged_sta_config(bool enabled) { skip_unchanged_sta_config_ = enabled; }
   void set_skip_disconnected_sta_disconnect(bool enabled) { skip_disconnected_sta_disconnect_ = enabled; }
@@ -826,6 +831,12 @@ class WiFiComponent final : public Component {
   uint32_t fixed_retry_started_{0};
   uint32_t fixed_retry_interval_ms_{10000};
   void (*fixed_channel_probe_)(const char *){nullptr};
+  void *fixed_recovery_context_{nullptr};
+  void (*fixed_recovery_listener_)(void *, const char *){nullptr};
+  bool fixed_recovery_connected_{false};
+  void notify_fixed_recovery_(const char *phase) {
+    if (fixed_recovery_listener_ != nullptr) fixed_recovery_listener_(fixed_recovery_context_, phase);
+  }
   bool skip_unchanged_sta_config_{false};
   bool skip_disconnected_sta_disconnect_{false};
   bool adaptive_fixed_retry_{false};

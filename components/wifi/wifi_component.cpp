@@ -804,6 +804,10 @@ void WiFiComponent::loop() {
 #endif
 
 #ifdef USE_WIFI_FIXED_CHANNEL
+    if (this->is_connected() != this->fixed_recovery_connected_) {
+      this->fixed_recovery_connected_ = this->is_connected();
+      if (this->fixed_recovery_connected_) this->notify_fixed_recovery_("wifi_connected");
+    }
     if (this->fixed_channel_operation() && this->adaptive_fixed_retry_) {
       if (this->is_connected()) {
         if (!this->adaptive_stable_tracking_) {
@@ -1248,6 +1252,9 @@ void WiFiComponent::connect_soon_() {
 }
 
 void WiFiComponent::start_connecting(const WiFiAP &ap) {
+#ifdef USE_WIFI_FIXED_CHANNEL
+  if (this->fixed_channel_operation()) this->notify_fixed_recovery_("before_attempt");
+#endif
   // Log connection attempt at INFO level with priority
   char bssid_s[18];
   int8_t priority = 0;
@@ -2316,6 +2323,7 @@ void WiFiComponent::retry_connect() {
       if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("retry_before_disconnect");
       this->wifi_disconnect_();
       if (this->fixed_channel_probe_ != nullptr) this->fixed_channel_probe_("retry_after_disconnect");
+      this->notify_fixed_recovery_("retry_after_disconnect");
       this->fixed_retry_started_ = millis();
       this->adaptive_stable_tracking_ = false;
       if (this->adaptive_fixed_retry_) {
