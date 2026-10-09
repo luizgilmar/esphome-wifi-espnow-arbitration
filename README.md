@@ -64,3 +64,12 @@ python -m pytest -q
 
 The baseline test verifies repository layout and the exact upstream file
 hashes. It will intentionally need revision in the first functional commit.
+
+## ESPHome 2026.9 captive portal compatibility
+
+The 2026.9 captive portal imports wifi/scan_list.h and calls
+WiFiScanResult::ssid_equals. This override now carries the unmodified
+scan_list.h from ESPHome 2026.9.1 and the corresponding inline SSID comparison.
+This is a targeted compatibility backport, not a full rebase of the Wi-Fi component.
+Arbitration, reconnect behavior, channels and retry settings are unchanged.
+Full HUB compilation on 2026.9.1 remains required.

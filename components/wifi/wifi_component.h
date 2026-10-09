@@ -328,6 +328,7 @@ class WiFiScanResult {
   void set_matches(bool matches);
   const bssid_t &get_bssid() const;
   StringRef get_ssid() const { return this->ssid_.ref(); }
+  bool ssid_equals(const WiFiScanResult &other) const { return this->ssid_ == other.ssid_; }
   uint8_t get_channel() const;
   int8_t get_rssi() const;
   bool get_with_auth() const;
